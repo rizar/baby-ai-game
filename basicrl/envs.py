@@ -16,12 +16,16 @@ except ImportError:
 import gym_aigame
 #import gym_aigame.envs
 
-def make_env(env_id, seed, rank, log_dir):
+def make_env(env_id, seed, rank, log_dir, numRooms, maxRoomSize):
     def _thunk():
         env = gym.make(env_id)
 
-        env.numRooms=1
-        env.maxRoomSize=4
+        env.numRooms=numRooms
+        env.maxRoomSize=maxRoomSize
+
+
+        import random
+        seed = random.randint(0, 0xFFFFFFFF)
 
         env.seed(seed + rank)
 

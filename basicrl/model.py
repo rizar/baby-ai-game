@@ -138,10 +138,10 @@ class MLPPolicy(FFPolicy):
 
         self.action_space = action_space
 
-        self.a_fc1 = nn.Linear(num_inputs, 64)
+        self.a_fc1 = nn.Linear(12 * 7 * 7, 64)
         self.a_fc2 = nn.Linear(64, 64)
 
-        self.v_fc1 = nn.Linear(num_inputs, 64)
+        self.v_fc1 = nn.Linear(12 * 7 * 7, 64)
         self.v_fc2 = nn.Linear(64, 64)
         self.v_fc3 = nn.Linear(64, 1)
 
@@ -176,6 +176,8 @@ class MLPPolicy(FFPolicy):
             self.dist.fc_mean.weight.data.mul_(0.01)
 
     def forward(self, inputs, states, masks):
+        inputs = inputs.view(-1, 12 * 7 * 7)
+
         x = self.v_fc1(inputs)
         x = F.tanh(x)
 
