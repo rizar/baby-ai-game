@@ -306,23 +306,6 @@ def main():
                 # Reset the rewards
                 final_rewards = torch.zeros([args.num_processes, 1])
 
-
-
-        """
-        if j % (20 * args.log_interval) == 0:
-            envs.close()
-            envs = [make_env(args.env_name, args.seed, i, args.log_dir, numRooms, maxRoomSize) for i in range(args.num_processes)]
-            envs = SubprocVecEnv(envs)
-            obs = envs.reset()
-            update_current_obs(obs)
-
-            # Reset the rewards
-            final_rewards = torch.zeros([args.num_processes, 1])
-        """
-
-
-
-
         if args.vis and j % args.vis_interval == 0:
             try:
                 # Sometimes monitor doesn't properly flush the outputs
