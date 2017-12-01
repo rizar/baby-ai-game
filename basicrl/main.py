@@ -293,7 +293,7 @@ def main():
 
             print(final_rewards.min())
 
-            if final_rewards.min() > 960 and len(paramSteps) > 0:
+            if final_rewards.min() > 950 and len(paramSteps) > 0:
                 numRooms, maxRoomSize = paramSteps[0]
                 paramSteps = paramSteps[1:]
 
@@ -308,7 +308,7 @@ def main():
 
 
 
-
+        """
         if j % (20 * args.log_interval) == 0:
             envs.close()
             envs = [make_env(args.env_name, args.seed, i, args.log_dir, numRooms, maxRoomSize) for i in range(args.num_processes)]
@@ -318,7 +318,7 @@ def main():
 
             # Reset the rewards
             final_rewards = torch.zeros([args.num_processes, 1])
-
+        """
 
 
 

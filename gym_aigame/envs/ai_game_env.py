@@ -144,8 +144,10 @@ class Door(WorldObj):
         r.drawCircle(CELL_PIXELS * 0.75, CELL_PIXELS * 0.5, 2)
 
     def toggle(self, env):
-        self.isOpen = True
-        return True
+        if not self.isOpen:
+            self.isOpen = True
+            return True
+        return False
 
     def canOverlap(self):
         """The agent can only walk over this cell when the door is open"""
@@ -514,6 +516,9 @@ class AIGameEnv(gym.Env):
         return grid
 
     def _reset(self):
+        import random
+        self.seed(random.randint(0, 0xFFFFFFFF))
+
         # Place the agent in the starting position and direction
         self.agentPos = self.startPos
         self.agentDir = self.startDir
@@ -641,7 +646,9 @@ class AIGameEnv(gym.Env):
                 self.carrying = cell
                 self.grid.set(self.agentPos[0] + u, self.agentPos[1] + v, None)
             elif cell:
-                cell.toggle(self)
+                result = cell.toggle(self)
+                #if result:
+                #    reward = 1
 
         else:
             assert False, "unknown action"
