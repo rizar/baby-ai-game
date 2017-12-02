@@ -56,41 +56,64 @@ def main():
         viz = Visdom()
         win = None
 
+
+
+
+
     paramSteps = [
         (1, 4),
         (1, 5),
         (1, 6),
         (1, 7),
+        (1, 8),
+        (1, 9),
+        (1, 10),
+        (1, 11),
 
         (2, 4),
         (2, 5),
         (2, 6),
         (2, 7),
+        (2, 8),
 
         (3, 4),
         (3, 5),
         (3, 6),
         (3, 7),
 
-        (4, 4),
-        (4, 5),
-        (4, 6),
-        (4, 7),
-        (4, 8),
-
         (5, 4),
         (5, 5),
         (5, 6),
         (5, 7),
         (5, 8),
-        (5, 9)
+        (5, 9),
+        (5, 10),
+
+        (6, 4),
+        (6, 5),
+        (6, 6),
+        (6, 7),
+        (6, 8),
+        (6, 9),
+        (6, 10)
     ]
+
+
+
 
     numRooms, maxRoomSize = paramSteps[0]
     paramSteps = paramSteps[1:]
 
     envs = [make_env(args.env_name, args.seed, i, args.log_dir, numRooms, maxRoomSize)
                 for i in range(args.num_processes)]
+
+
+
+
+
+
+
+
 
     if args.num_processes > 1:
         envs = SubprocVecEnv(envs)
@@ -291,8 +314,9 @@ def main():
                        value_loss.data[0], action_loss.data[0]))
 
 
-            print(final_rewards.min())
 
+
+            print(final_rewards.min())
             if final_rewards.min() > 950 and len(paramSteps) > 0:
                 numRooms, maxRoomSize = paramSteps[0]
                 paramSteps = paramSteps[1:]
@@ -305,6 +329,11 @@ def main():
 
                 # Reset the rewards
                 final_rewards = torch.zeros([args.num_processes, 1])
+
+
+
+
+
 
         if args.vis and j % args.vis_interval == 0:
             try:

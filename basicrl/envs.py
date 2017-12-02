@@ -20,18 +20,16 @@ def make_env(env_id, seed, rank, log_dir, numRooms, maxRoomSize):
     def _thunk():
         env = gym.make(env_id)
 
-        env.numRooms=numRooms
+        #env.numRooms=numRooms
+        #env.maxRoomSize=maxRoomSize
+        env.minNumRooms=numRooms
+        env.maxNumRooms=numRooms
         env.maxRoomSize=maxRoomSize
 
-
+        # Regen the environment randomly
         import random
         seed = random.randint(0, 0xFFFFFFFF)
-
         env.seed(seed + rank)
-
-        #print(len(env.rooms))
-
-
 
         env = WrapPyTorch(env)
         return env
