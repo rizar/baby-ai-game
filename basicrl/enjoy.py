@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import types
 import time
 
@@ -26,7 +27,7 @@ parser.add_argument('--load-dir', default='./trained_models/',
 args = parser.parse_args()
 
 
-env = make_env(args.env_name, args.seed, 0, None, 3, 5)
+env = make_env(args.env_name, args.seed, 0, None, 5, 7)
 env = DummyVecEnv([env])
 
 actor_critic, ob_rms = \
@@ -103,4 +104,7 @@ while True:
             humanPos, humanOrn = p.getBasePositionAndOrientation(torsoId)
             p.resetDebugVisualizerCamera(distance, yaw, -20, humanPos)
 
-    render_func('human')
+    renderer = render_func('human')
+
+    if not renderer.window:
+        sys.exit(0)

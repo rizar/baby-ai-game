@@ -20,9 +20,7 @@ def make_env(env_id, seed, rank, log_dir, numRooms, maxRoomSize):
     def _thunk():
         env = gym.make(env_id)
 
-        #env.numRooms=numRooms
-        #env.maxRoomSize=maxRoomSize
-        env.minNumRooms=numRooms
+        env.minNumRooms=1
         env.maxNumRooms=numRooms
         env.maxRoomSize=maxRoomSize
 

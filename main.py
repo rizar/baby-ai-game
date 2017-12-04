@@ -16,7 +16,6 @@ from gym_aigame.envs import AIGameEnv, Teacher
 from model.training import selectAction
 
 class AIGameWindow(QMainWindow):
-
     def __init__(self, env):
         super().__init__()
         self.initUI()
