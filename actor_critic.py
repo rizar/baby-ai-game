@@ -132,6 +132,12 @@ def main():
         env.action_space.n
     )
 
+    modelSize = 0
+    for p in model.parameters():
+        pSize = reduce(operator.mul, p.size(), 1)
+        modelSize += pSize
+    print('Model size: %d' % modelSize)
+
     # Create the gradient descent optimizer
     #optimizer = optim.Adam(model.parameters(), lr=0.0005)
     optimizer = optim.SGD(model.parameters(), lr=0.0005, momentum=0.4)
