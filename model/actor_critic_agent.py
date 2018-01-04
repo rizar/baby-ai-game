@@ -75,7 +75,7 @@ class ActorCritic_Agent(object):
             self.memory = ReplayMemory(memory_capacity, num_frame_rp)
 
     def process_reward(self, reward):
-        reward = reward / sef.reward_scale
+        reward = reward / self.reward_scale
         if self.reward_clip:
             reward = min(max(reward, self.reward_min), self.reward_max)
         return reward
@@ -508,7 +508,7 @@ class ActorCritic_Agent(object):
             nextstate, reward, done, _ = self.env.step(action)
             if render:
                 self.env.render()
-                time.sleep(0.5)
+                time.sleep(0.1)
             next_state = self.process_state(nextstate)
 
             if max_iters is not None:
@@ -534,7 +534,7 @@ class ActorCritic_Agent(object):
                 state = self.env.reset()
                 state = self.process_state(state)
                 self.model.reset_hidden_states()
-                time.sleep(3)
+                time.sleep(1)
 
             if (max_iters is not None) and (step >= max_iters):
                 break
