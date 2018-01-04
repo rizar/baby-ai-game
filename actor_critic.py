@@ -6,6 +6,7 @@ from itertools import count
 from collections import namedtuple
 import operator
 from functools import reduce
+import os
 
 import torch
 import torch.nn as nn
@@ -14,169 +15,144 @@ import torch.optim as optim
 from torch.autograd import Variable
 from torch.distributions import Categorical
 
+from model import ActorCritic_Agent, Checkpoint
+
 import gym
 import gym_minigrid
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--no-cuda', action='store_true', default=False,
+                    help='Disables CUDA training.')
+parser.add_argument('--seed', type=int, default=1234,
+                    help='Random seed (default: 1234).')
+parser.add_argument('--batch-size', type=int, default=32,
+                    help='mini-batch size')
+parser.add_argument('--env', type=str, default='MiniGrid-Empty-6x6-v0',
+                    help='gym environment to load')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor (default: 0.99)')
-parser.add_argument('--seed', type=int, default=543, metavar='N',
-                    help='random seed (default: 1)')
+parser.add_argument('--tau', type=float, default=1.00,
+                    help='parameter for GAE (default: 1.00)')
+parser.add_argument('--value-loss-coef', type=float, default=0.5,
+                    help="Coefficient associated with the critic loss.")
+parser.add_argument('--entropy-coef', type=float, default=0.01,
+                    help="Coefficient associated with the policy entropy.")
+parser.add_argument('--lr', type=float, default=0.0001,
+                    help='learning rate (default: 0.0001)')
+parser.add_argument('--max-grad-norm', type=float, default=50,
+                    help='max value of the gradient norm (default: 50)')
+parser.add_argument('--max-iters', type=int, default=1000000,
+                    help='maximum training iterations (default: 1000000)')
+parser.add_argument('--num-steps', type=int, default=20,
+                    help='number max of forward steps in AC (default: 20).' +
+                    ' Use 0 to go through complete episodes before updating.')
+parser.add_argument('--no-memory', action='store_true', default=False,
+                    help='Disables Memory Replay.')
+parser.add_argument('--memory-size', default=2000,
+                    type=int, help="Replay memory size (default: 2000).")
+parser.add_argument('--memory-start', default=200,
+                    type=int, help="Replay memory start size (default: 200).")
+parser.add_argument('--num-frame-rp', default=3, type=int,
+                    help="Num frames for the reward prediction (default: 3)")
 parser.add_argument('--render', action='store_true',
                     help='render the environment')
+parser.add_argument('--num-checkpoints', default=50,
+                    type=int, help="Number of check points (default: 50).")
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='interval between training status logs (default: 10)')
+parser.add_argument('--expt-dir', type=str, default='./experiment',
+                    help='Path to experiment directory. If load_checkpoint ' +
+                    'is True, then path to checkpoint directory has to be ' +
+                    'provided')
+parser.add_argument('--load-checkpoint', action='store', help='The name of ' +
+                    'the checkpoint to load, usually an encoded time string')
+parser.add_argument('--resume', action='store_true', default=False,
+                    help='Indicates if training has to be resumed from ' +
+                    'the latest checkpoint')
 args = parser.parse_args()
+args.cuda = not args.no_cuda and torch.cuda.is_available()
+args.usememory = not args.no_memory
+if args.num_steps == 0:
+    args.num_steps = None
+args.checkpoint_every = int(args.max_iters / (args.num_checkpoints + 1)) + 1
 
 SavedAction = namedtuple('SavedAction', ['log_prob', 'value'])
 
-class Policy(nn.Module):
-    def __init__(self, input_size, obs_high, num_actions):
-        super(Policy, self).__init__()
-
-        self.num_inputs = reduce(operator.mul, input_size, 1)
-        self.obs_high = obs_high
-
-        self.a_fc1 = nn.Linear(self.num_inputs, 64)
-        self.a_fc2 = nn.Linear(64, 64)
-        self.a_fc3 = nn.Linear(64, num_actions)
-
-        self.v_fc1 = nn.Linear(self.num_inputs, 64)
-        self.v_fc2 = nn.Linear(64, 64)
-        self.v_fc3 = nn.Linear(64, 1)
-
-        self.saved_actions = []
-        self.rewards = []
-
-    def forward(self, inputs):
-        # Reshape the input so that it is one-dimensional
-        inputs = inputs.view(-1, self.num_inputs)
-
-        # Rescale observation values in [0,1]
-        inputs = inputs / self.obs_high
-
-        # Don't put a relu on the last layer, because we want to avoid
-        # zero probabilities
-        x = F.tanh(self.a_fc1(inputs))
-        x = F.tanh(self.a_fc2(x))
-        action_scores = F.tanh(self.a_fc3(x))
-        action_probs = F.softmax(action_scores, dim=1)
-
-        x = F.tanh(self.v_fc1(inputs))
-        x = F.tanh(self.v_fc2(x))
-        state_value = self.v_fc3(x)
-
-        return action_probs, state_value
-
-def select_action(model, state):
-    state = torch.from_numpy(state).float().unsqueeze(0)
-
-    action_probs, state_value = model(Variable(state))
-
-    #print(action_probs)
-
-    m = Categorical(action_probs)
-    action = m.sample()
-
-    """
-    # Maxime: hack to force exploration
-    import random
-    if random.random() < 0.05:
-        action = random.randint(0, 3)
-        action = torch.LongTensor([action])
-        action = Variable(action)
-    """
-
-    model.saved_actions.append(SavedAction(m.log_prob(action), state_value))
-
-    return action.data[0]
-
-def finish_episode(model, optimizer):
-    R = 0
-    saved_actions = model.saved_actions
-    policy_losses = []
-    value_losses = []
-    rewards = []
-
-    for r in model.rewards[::-1]:
-        R = r + args.gamma * R
-        rewards.insert(0, R)
-
-    rewards = torch.Tensor(rewards)
-    rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)
-
-    for (log_prob, value), r in zip(saved_actions, rewards):
-        # Advantage Estimate: A = R - V(s)
-        reward = r - value.data[0, 0]
-        policy_losses.append(-log_prob * reward)
-        value_losses.append(F.smooth_l1_loss(value, Variable(torch.Tensor([r]))))
-
-    optimizer.zero_grad()
-    loss = torch.cat(policy_losses).sum() + torch.cat(value_losses).sum()
-    loss.backward()
-    optimizer.step()
-
-    del model.rewards[:]
-    del model.saved_actions[:]
 
 def main():
-    torch.manual_seed(args.seed)
 
-    env = gym.make('MiniGrid-Empty-6x6-v0')
-    env.seed(args.seed)
+    env = gym.make(args.env)
 
-    # Create the policy/model based on the environment
-    model = Policy(
-        env.observation_space.shape,
-        env.observation_space.high[0][0][0],
-        env.action_space.n
+    if args.load_checkpoint is not None:
+        model_args = None
+    else:
+        model_args = {
+            'img_shape': [3, 7, 7],
+            'action_space': env.action_space.n,
+            'channels': [3, 16, 32],
+            'kernels': [4, 3],
+            'strides': None,
+            'langmod': False,
+            'vocab_size': 10,
+            'embed_dim': 64,
+            'langmod_hidden_size': 64,
+            'actmod_hidden_size': 128,
+            'policy_hidden_size': 64,
+            'langmod_pred': False,
+            'num_frames_reward_prediction': args.num_frame_rp,
+        }
+
+    # Create the RL agent based on the environment
+    agent = ActorCritic_Agent(
+        env, args, device=None,
+        expt_dir=args.expt_dir,
+        checkpoint_every=args.checkpoint_every,
+        log_interval=args.log_interval,
+        usememory=args.usememory,
+        memory_capacity=args.memory_size,
+        num_frame_rp=args.num_frame_rp,
+        memory_start=args.memory_start,
+        input_scale=env.observation_space.high[0][0][0],
+        reward_scale=1000,
+        model_args=model_args,
     )
 
-    modelSize = 0
-    for p in model.parameters():
-        pSize = reduce(operator.mul, p.size(), 1)
-        modelSize += pSize
-    print('Model size: %d' % modelSize)
+    if args.load_checkpoint is not None:
+        print(
+            "loading checkpoint from {}".format(
+                os.path.join(
+                    args.expt_dir,
+                    Checkpoint.CHECKPOINT_DIR_NAME,
+                    args.load_checkpoint)
+            )
+        )
+        checkpoint_path = os.path.join(
+            args.expt_dir,
+            Checkpoint.CHECKPOINT_DIR_NAME,
+            args.load_checkpoint)
+        checkpoint = Checkpoint.load(checkpoint_path)
+        model = checkpoint.model
+        agent.model = model
 
-    # Create the gradient descent optimizer
-    #optimizer = optim.Adam(model.parameters(), lr=0.0005)
-    optimizer = optim.SGD(model.parameters(), lr=0.0005, momentum=0.4)
+        print("Finishing Loading")
 
-    # This is used by the pytorch-a2c code
-    # Initially promising, but then gets stuck failing
-    #optimizer = optim.RMSprop(model.parameters(), lr=7e-4, eps=1e-5, alpha=0.99)
+        # test the agent
+        agent.test(max_iters=args.max_iters, render=args.render)
 
-    totalFrames = 0
-    runningReward = 0
+    else:
 
-    for i_episode in count(1):
+        # train the agent
+        agent.train(
+            max_iters=args.max_iters,
+            max_fwd_steps=args.num_steps,
+            resume=args.resume,
+            path='.'
+        )
 
-        state = env.reset()
+        # runningReward = runningReward * 0.99 + sumReward * 0.01
+        # print('Episode {}, frames: {}, running reward: {:.2f}'.format(
+        #     i_episode, totalFrames, runningReward))
 
-        for t in range(1, 10000):
-            action = select_action(model, state)
-
-            state, reward, done, _ = env.step(action)
-
-            model.rewards.append(reward)
-
-            if args.render:
-                env.render()
-
-            if done:
-                break
-
-        sumReward = sum(model.rewards)
-        if sumReward > 0:
-            print('SUCCESS')
-
-        totalFrames += t
-        runningReward = runningReward * 0.99 + sumReward * 0.01
-
-        finish_episode(model, optimizer)
-
-        if i_episode % args.log_interval == 0:
-            print('Episode {}, frames: {}, running reward: {:.2f}'.format(i_episode, totalFrames, runningReward))
 
 if __name__ == '__main__':
     main()

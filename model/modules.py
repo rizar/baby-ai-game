@@ -1,11 +1,13 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 import torch.optim as optim
 import numpy as np
-from collections import namedtuple, deque
+import math
+from functools import reduce
+import operator
+from collections import namedtuple, deque, OrderedDict
 
 
 class VisionModule(nn.Module):
@@ -23,6 +25,12 @@ class VisionModule(nn.Module):
         if strides is None:
             strides = [1] * len(kernels)
         assert len(kernels) == len(strides), "The array lengths must be equals"
+
+        self.channels = list(channels)
+        self.kernels = list(kernels)
+        self.strides = list(strides)
+
+        ordered_modules = OrderedDict()
         for i in range(len(channels) - 1):
             conv = nn.Conv2d(
                 in_channels=channels[i],
@@ -30,17 +38,58 @@ class VisionModule(nn.Module):
                 kernel_size=kernels[i],
                 stride=strides[i]
             )
-            setattr(self, "conv{}".format(i + 1), conv)
+            ordered_modules["conv{}".format(i + 1)] = conv
+            # setattr(self, "conv{}".format(i + 1), conv)
+        # self.num_layers = len(channels) - 1
 
-        self.num_layers = len(channels) - 1
+        self.conv = nn.Sequential(ordered_modules)
 
     def forward(self, x):
-        # x is input image with shape [3, 84, 84]
-        out = x
-        for i in range(self.num_layers):
-            out = getattr(self, "conv{}".format(i + 1))(out)
+        # # x is input image with shape [3, 84, 84]
+        # out = x
+        # for i in range(self.num_layers):
+        #    out = getattr(self, "conv{}".format(i + 1))(out)
+        # return out
+        return self.conv(x)
 
-        return out
+    def get_output_shape(self, input_shape):
+        if len(input_shape) == 1:
+            h, w = input_shape[0], input_shape[0]
+        elif len(input_shape) == 2:
+            h, w = input_shape[0], input_shape[1]
+        elif len(input_shape) == 3:
+            h, w = input_shape[1], input_shape[2]
+        else:
+            h, w = input_shape[-2], input_shape[-1]
+
+        for i in range(len(self.channels) - 1):
+            kernel_size = self.kernels[i]
+            stride = self.strides[i]
+            if isinstance(kernel_size, int):
+                kernel_size = (kernel_size, kernel_size)
+            if isinstance(stride, int):
+                stride = (stride, stride)
+
+            h = math.floor((h - 1 * (kernel_size[0] - 1) - 1) / stride[0] + 1)
+            w = math.floor((w - 1 * (kernel_size[1] - 1) - 1) / stride[1] + 1)
+
+            h = int(h)
+            w = int(w)
+
+        return [self.channels[-1], h, w]
+
+    def build_deconv(self):
+        ordered_modules = OrderedDict()
+        for i in range(len(self.channels) - 2, -1, -1):
+            deconv = nn.ConvTranspose2d(
+                in_channels=self.channels[i + 1],
+                out_channels=self.channels[i],
+                kernel_size=self.kernels[i],
+                stride=self.strides[i]
+            )
+            ordered_modules["deconv{}".format(
+                len(self.channels) - i - 1)] = deconv
+        return nn.Sequential(ordered_modules)
 
 
 class LanguageModule(nn.Module):
@@ -69,7 +118,7 @@ class LanguageModule(nn.Module):
 
         return h
 
-    def LP(self, x):
+    def LP_Inv_Emb(self, x):
         return F.linear(x, self.embeddings.weight)
 
 # Conditional Batch norm is a classical Batch Norm Module
@@ -113,7 +162,7 @@ class MixingModule(nn.Module):
     def __init__(self):
         super(MixingModule, self).__init__()
 
-    def forward(self, visual_encoded, instruction_encoded):
+    def forward(self, visual_encoded, instruction_encoded=None):
         '''
             Argument:
                 visual_encoded: output of vision module, shape [batch_size, 64, 7, 7]
@@ -121,32 +170,37 @@ class MixingModule(nn.Module):
         '''
         batch_size = visual_encoded.size()[0]
         visual_flatten = visual_encoded.view(batch_size, -1)
-        instruction_flatten = instruction_encoded.view(batch_size, -1)
-
-        mixed = torch.cat([visual_flatten, instruction_flatten], dim=1)
-
-        return mixed
-
-
-# We should do a ConditionalBatchNormModule, ClassifierModule, HistoricalRNN Module
-# RL Module
+        if instruction_encoded is not None:
+            instruction_flatten = instruction_encoded.view(batch_size, -1)
+            mixed = torch.cat([visual_flatten, instruction_flatten], dim=1)
+            return mixed
+        else:
+            return visual_flatten
 
 
 class ActionModule(nn.Module):
 
-    def __init__(self, batch_size=1, hidden_size=256):
+    def __init__(self, input_size=3264, hidden_size=256):
         super(ActionModule, self).__init__()
-        self.batch_size = batch_size
         self.hidden_size = hidden_size
 
-        self.lstm_1 = nn.LSTMCell(input_size=3264, hidden_size=256)
-        self.lstm_2 = nn.LSTMCell(input_size=256, hidden_size=256)
+        self.lstm_1 = nn.LSTM(
+            input_size=input_size, hidden_size=hidden_size, batch_first=True)
+        self.lstm_2 = nn.LSTM(
+            input_size=hidden_size, hidden_size=hidden_size, batch_first=True)
 
-        self.hidden_1 = (Variable(torch.randn(batch_size, hidden_size)).cuda(),
-                         Variable(torch.randn(batch_size, hidden_size)).cuda())
+        self.hidden_1 = None
+        self.hidden_2 = None
 
-        self.hidden_2 = (Variable(torch.randn(batch_size, hidden_size)).cuda(),
-                         Variable(torch.randn(batch_size, hidden_size)).cuda())
+    def reset_hidden_states(self):
+        self.hidden_1 = None
+        self.hidden_2 = None
+
+    def detach_hidden_states(self):
+        if not self.hidden_1 is None:
+            self.hidden_1 = (l.detach() for l in self.hidden_1)
+        if not self.hidden_2 is None:
+            self.hidden_2 = (l.detach() for l in self.hidden_2)
 
     def forward(self, x):
         '''
@@ -154,15 +208,58 @@ class ActionModule(nn.Module):
                 x: x is output from the Mixing Module, as shape [batch_size, 1, 3264]
         '''
         # Feed forward
-        h1, c1 = self.lstm_1(x, self.hidden_1)
-        h2, c2 = self.lstm_2(h1, self.hidden_2)
+        if x.dim() == 2:
+            x = x.view(x.size(0), 1, x.size(1))
+
+        _, s1 = self.lstm_1(x, self.hidden_1)
+        h1, c1 = s1
+
+        x1 = h1.transpose(0, 1).view(h1.size(1), 1, -1)
+
+        _, s2 = self.lstm_2(x1, self.hidden_2)
+        h2, c2 = s2
 
         # Update current hidden state
         self.hidden_1 = (h1, c1)
         self.hidden_2 = (h2, c2)
 
         # Return the hidden state of the upper layer
-        return h2
+        x2 = h2.transpose(0, 1).view(h2.size(1), -1)
+        return x2
+
+    def forward_with_hidden_states(self, x, hidden_states=None):
+        '''
+            Argument:
+                x: x is output from the Mixing Module, as shape [batch_size, 1, 3264]
+        '''
+        # Feed forward
+        if x.dim() == 2:
+            x = x.view(x.size(0), 1, x.size(1))
+
+        if hidden_states is None:
+            hidden_states_1 = None
+            hidden_states_2 = None
+        else:
+            hidden_states_1, hidden_states_2 = hidden_states
+
+        _, s1 = self.lstm_1(x, hidden_states_1)
+        h1, c1 = s1
+
+        x1 = h1.transpose(0, 1).view(h1.size(1), 1, -1)
+
+        _, s2 = self.lstm_2(x1, hidden_states_2)
+        h2, c2 = s2
+
+        # Update current hidden state
+        hidden_states_1 = (h1, c1)
+        hidden_states_2 = (h2, c2)
+
+        # Return the hidden state of the upper layer
+        x2 = h2.transpose(0, 1).view(h2.size(1), -1)
+        return x2, (hidden_states_1, hidden_states_2)
+
+# We should do a ConditionalBatchNormModule, ClassifierModule, HistoricalRNN Module
+# RL Module
 
 
 SavedAction = namedtuple('SavedAction', ['action', 'value'])
@@ -170,13 +267,13 @@ SavedAction = namedtuple('SavedAction', ['action', 'value'])
 
 class Policy(nn.Module):
 
-    def __init__(self, action_space):
+    def __init__(self, action_space, input_size=256, hidden_size=128):
         super(Policy, self).__init__()
         self.action_space = action_space
 
-        self.affine1 = nn.Linear(256, 128)
-        self.action_head = nn.Linear(128, action_space)
-        self.value_head = nn.Linear(128, 1)
+        self.affine1 = nn.Linear(input_size, hidden_size)
+        self.action_head = nn.Linear(hidden_size, action_space)
+        self.value_head = nn.Linear(hidden_size, 1)
 
         self.saved_actions = []
         self.rewards = []
@@ -195,8 +292,9 @@ class Policy(nn.Module):
             action_logits: shape [1, action_space]
 
         Return:
-            output has shape: [1, 128]
-
+            output has shape: [1, hidden_size] # [1, 128]
+                which is the inverse transformation of the Linear
+                module corresponding to the policy (action_head)
         '''
         bias = torch.unsqueeze(
             self.action_head.bias, 0).repeat(
@@ -210,19 +308,20 @@ class Policy(nn.Module):
         return output
 
 
-class temporal_AutoEncoder(nn.Module):
+class TemporalAutoEncoder(nn.Module):
 
-    def __init__(self, policy_network, vision_module):
-        super(temporal_AutoEncoder, self).__init__()
+    def __init__(self, policy_network, vision_module,
+                 input_size=128, vision_encoded_shape=[64, 7, 7]):
+        super(TemporalAutoEncoder, self).__init__()
+
         self.policy_network = policy_network
         self.vision_module = vision_module
+        self.vision_encoded_shape = vision_encoded_shape
+        self.input_size = input_size
+        self.hidden_size = reduce(operator.mul, vision_encoded_shape, 1)
 
-        self.linear_1 = nn.Linear(128, 64 * 7 * 7)
-
-        self.deconv = nn.Sequential(
-            nn.ConvTranspose2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
-            nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, stride=2),
-            nn.ConvTranspose2d(in_channels=32, out_channels=3, kernel_size=8, stride=4))
+        self.linear_1 = nn.Linear(input_size, self.hidden_size)
+        self.deconv = vision_module.build_deconv()
 
     def forward(self, visual_input, logit_action):
         '''
@@ -234,7 +333,8 @@ class temporal_AutoEncoder(nn.Module):
 
         action_out = self.policy_network.tAE(logit_action)  # [1, 128]
         action_out = self.linear_1(action_out)
-        action_out = action_out.view(action_out.size()[0], 64, 7, 7)
+        action_out = action_out.view(
+            action_out.size()[0], *self.vision_encoded_shape)
 
         combine = torch.mul(action_out, visual_encoded)
 
@@ -242,14 +342,18 @@ class temporal_AutoEncoder(nn.Module):
         return out
 
 
-class Language_Prediction(nn.Module):
+class LanguagePrediction(nn.Module):
 
-    def __init__(self, language_module):
-        super(Language_Prediction, self).__init__()
+    def __init__(self, language_module,
+                 vision_encoded_shape=[64, 7, 7],
+                 hidden_size=128):
+        super(LanguagePrediction, self).__init__()
         self.language_module = language_module
 
+        input_size = reduce(operator.mul, vision_encoded_shape, 1)
+
         self.vision_transform = nn.Sequential(
-            nn.Linear(64 * 7 * 7, 128),
+            nn.Linear(input_size, hidden_size),
             nn.ReLU())
 
     def forward(self, vision_encoded):
@@ -258,39 +362,51 @@ class Language_Prediction(nn.Module):
             vision_encoded.size()[0], -1)
         vision_out = self.vision_transform(vision_encoded_flatten)
 
-        language_predict = self.language_module.LP(vision_out)
+        language_predict = self.language_module.LP_Inv_Emb(vision_out)
 
         return language_predict
 
 
-class RewardPredictor(nn.Module):
+class RewardPrediction(nn.Module):
 
-    def __init__(self, vision_module, language_module, mixing_module):
-        super(RewardPredictor, self).__init__()
+    def __init__(self, vision_module, language_module, mixing_module,
+                 num_elts=3, vision_encoded_shape=[64, 7, 7],
+                 language_encoded_size=128):
+        super(RewardPrediction, self).__init__()
 
         self.vision_module = vision_module
         self.language_module = language_module
         self.mixing_module = mixing_module
-        self.linear = nn.Linear(3 * (64 * 7 * 7 + 128), 1)
+        self.linear = nn.Linear(
+            num_elts * (
+                reduce(
+                    operator.mul,
+                    vision_encoded_shape, 1) + language_encoded_size
+            ),
+            1
+        )
 
     def forward(self, x):
         '''
-            x: state including image and instruction, each batch contains 3 image in sequence
+            x: state including image and instruction,
+                    each batch contains 3 (num_elts) images in sequence
                     with the instruction to be encoded
         '''
         batch_visual = []
         batch_instruction = []
 
         for batch in x:
-            visual = [b.visual for b in batch]
-            instruction = [b.instruction for b in batch]
+            visual = [b.image for b in batch]
+            instruction = [b.mission for b in batch]
 
             batch_visual.append(torch.cat(visual, 0))
             batch_instruction.append(torch.cat(instruction, 0))
 
         batch_visual_encoded = self.vision_module(torch.cat(batch_visual, 0))
-        batch_instruction_encoded = self.language_module(
-            torch.cat(batch_instruction, 0))
+        batch_instruction_encoded = None
+        if not (self.language_module is None):
+            batch_instruction_encoded = self.language_module(
+                torch.cat(batch_instruction, 0))
 
         batch_mixed = self.mixing_module(
             batch_visual_encoded, batch_instruction_encoded)
