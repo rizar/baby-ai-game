@@ -49,6 +49,7 @@ class Policy(nn.Module):
     def __init__(self, obs_space, action_space):
         super().__init__()
 
+        self.obs_high = obs_space.high[0,0,0]
         num_inputs = reduce(operator.mul, obs_space.shape, 1)
         num_actions = action_space.n
 
@@ -58,6 +59,7 @@ class Policy(nn.Module):
 
     def forward(self, obs):
         inputs = obs.view(-1)
+        inputs = inputs / self.obs_high
 
         x = F.tanh(self.fc1(inputs))
         x = F.tanh(self.fc2(x))
@@ -77,9 +79,29 @@ def selectAction(policy, obs):
     action = m.sample()
     return action.data[0]
 
+def evalPolicy(policy, env):
+    """
+    Evaluate a policy by summing rewards over one episode
+    """
+
+    sumRewards = 0
+
+    obs = env.reset()
+
+    while True:
+        action = selectAction(policy, obs)
+        obs, reward, done, info = env.step(action)
+
+        sumRewards += reward
+
+        if done:
+            break
+
+    return sumRewards
+
 ##############################################################################
 
-parser = argparse.ArgumentParser(description='RL')
+parser = argparse.ArgumentParser(description='Evolutionary RL Implementation')
 parser.add_argument(
     '--env-name',
     default='MiniGrid-Empty-6x6-v0',
@@ -99,14 +121,7 @@ args = parser.parse_args()
 env = gym.make(args.env_name)
 
 
-
-
-
-
-
-policy = Policy(env.observation_space, env.action_space)
-policy.apply(weightInit)
-
+"""
 #print(list(policy.parameters()))
 modelSize = 0
 for p in policy.parameters():
@@ -114,16 +129,38 @@ for p in policy.parameters():
     modelSize += pSize
 print(str(policy))
 print('Total model size: %d' % modelSize)
+"""
 
-env.seed(0)
-obs = env.reset()
 
-for i in range(0, 10):
-    action = selectAction(policy, obs)
-    print(action)
+
+NUM_POLICIES = 2000
+NUM_EPISODES = 100
+
+bestR = 0
+
+for policyNo in range(1, NUM_POLICIES):
+
+    # NOTE: recreating from scratch is probably inefficient
+    # will want to time this
+    policy = Policy(env.observation_space, env.action_space)
+    policy.apply(weightInit)
+
+    sumR = 0
+    for episodeNo in range(0, NUM_EPISODES):
+        sumR += evalPolicy(policy, env)
+    sumR /= NUM_EPISODES
+
+    if sumR > bestR:
+        bestR = sumR
+
+    print('%d/%d reward: %.1f, best: %.1f' % (policyNo, NUM_POLICIES, sumR, bestR))
 
 
 # Param updates weighed by returns of each noise vector
+
+
+
+
 
 
 
