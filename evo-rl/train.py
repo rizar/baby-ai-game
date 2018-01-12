@@ -70,6 +70,16 @@ class Policy(nn.Module):
 
         return action_probs
 
+"""
+#print(list(policy.parameters()))
+modelSize = 0
+for p in policy.parameters():
+    pSize = reduce(operator.mul, p.size(), 1)
+    modelSize += pSize
+print(str(policy))
+print('Total model size: %d' % modelSize)
+"""
+
 def selectAction(policy, obs):
     obs = torch.from_numpy(obs).float().unsqueeze(0)
 
@@ -112,24 +122,15 @@ parser.add_argument(
     default=0.0001,
     help='learning rate'
 )
-# TODO:
-# sigma, noise standard deviation for mutations
-
+parser.add_argument(
+    '--noise_stddev',
+    default=0.02,
+    help='standard deviation of parameter noise'
+)
 args = parser.parse_args()
 
 # Create an instance of the environment
 env = gym.make(args.env_name)
-
-
-"""
-#print(list(policy.parameters()))
-modelSize = 0
-for p in policy.parameters():
-    pSize = reduce(operator.mul, p.size(), 1)
-    modelSize += pSize
-print(str(policy))
-print('Total model size: %d' % modelSize)
-"""
 
 
 
@@ -139,15 +140,18 @@ NUM_EPISODES = 100
 bestR = 0
 
 for policyNo in range(1, NUM_POLICIES):
-
-    # NOTE: recreating from scratch is probably inefficient
-    # will want to time this
+    # Note: time to create policy is on the order of 1 to 2 ms
     policy = Policy(env.observation_space, env.action_space)
     policy.apply(weightInit)
 
     sumR = 0
-    for episodeNo in range(0, NUM_EPISODES):
+    for episodeNo in range(1, NUM_EPISODES+1):
         sumR += evalPolicy(policy, env)
+        if episodeNo > 10 and sumR == 0:
+            break
+        if episodeNo > 20 and (sumR / episodeNo) < 0.75 * bestR:
+            break
+
     sumR /= NUM_EPISODES
 
     if sumR > bestR:
