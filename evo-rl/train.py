@@ -20,6 +20,8 @@ import argparse
 import operator
 from functools import reduce
 
+import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,7 +37,6 @@ import gym_minigrid
 def weightInit(m):
     className = m.__class__.__name__
 
-    # TODO: check how paper does weight init
     if className.find('Linear') != -1:
         m.weight.data.normal_(0.0, 1)
         m.bias.data.fill_(0)
@@ -95,6 +96,7 @@ def evalPolicy(policy, env):
     """
 
     sumRewards = 0
+    numSteps = 0
 
     obs = env.reset()
 
@@ -103,11 +105,12 @@ def evalPolicy(policy, env):
         obs, reward, done, info = env.step(action)
 
         sumRewards += reward
+        numSteps += 1
 
         if done:
             break
 
-    return sumRewards
+    return sumRewards, numSteps
 
 ##############################################################################
 
@@ -138,6 +141,7 @@ NUM_POLICIES = 2000
 NUM_EPISODES = 100
 
 bestR = 0
+totalSteps = 0
 
 for policyNo in range(1, NUM_POLICIES):
     # Note: time to create policy is on the order of 1 to 2 ms
@@ -146,7 +150,11 @@ for policyNo in range(1, NUM_POLICIES):
 
     sumR = 0
     for episodeNo in range(1, NUM_EPISODES+1):
-        sumR += evalPolicy(policy, env)
+        rewards, numSteps = evalPolicy(policy, env)
+
+        sumR += rewards
+        totalSteps += numSteps
+
         if episodeNo > 10 and sumR == 0:
             break
         if episodeNo > 20 and (sumR / episodeNo) < 0.75 * bestR:
@@ -157,7 +165,7 @@ for policyNo in range(1, NUM_POLICIES):
     if sumR > bestR:
         bestR = sumR
 
-    print('%d/%d reward: %.1f, best: %.1f' % (policyNo, NUM_POLICIES, sumR, bestR))
+    print('%d/%d, steps: %d, reward: %.1f, best: %.1f' % (policyNo, NUM_POLICIES, totalSteps, sumR, bestR))
 
 
 # Param updates weighed by returns of each noise vector
