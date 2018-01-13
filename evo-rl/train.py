@@ -18,6 +18,7 @@ import os
 import time
 import argparse
 import operator
+from copy import deepcopy
 from functools import reduce
 
 import numpy as np
@@ -64,6 +65,9 @@ class Policy(nn.Module):
         self.fc1 = nn.Linear(num_inputs, 64)
         self.fc2 = nn.Linear(64, 64)
         self.fc3 = nn.Linear(64, num_actions)
+
+        # Initialize the parameters
+        self.apply(weightInit)
 
     def forward(self, obs):
         inputs = obs.view(-1)
@@ -113,8 +117,8 @@ def evalPolicy(policy, env):
         sumRewards += reward
         numSteps += 1
 
-        if reward > 0:
-            print('SUCCESS')
+        #if reward > 0:
+        #    print('SUCCESS')
 
         if done:
             break
@@ -136,7 +140,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--noise_stddev',
-    default=0.02,
+    default=0.001,
     help='standard deviation of parameter noise'
 )
 args = parser.parse_args()
@@ -146,16 +150,23 @@ env = gym.make(args.env_name)
 
 
 
+
+
+
+
+
+
 NUM_POLICIES = 10000
 NUM_EPISODES = 100
 
-bestR = 0
+# Note: time to create policy is on the order of 1 to 2 ms
+bestPolicy = Policy(env.observation_space, env.action_space)
+
+bestScore = 0
 totalSteps = 0
 
-for policyNo in range(1, NUM_POLICIES):
-    # Note: time to create policy is on the order of 1 to 2 ms
-    policy = Policy(env.observation_space, env.action_space)
-    policy.apply(weightInit)
+def scorePolicy(policy):
+    global totalSteps
 
     sumR = 0
     for episodeNo in range(1, NUM_EPISODES+1):
@@ -165,37 +176,47 @@ for policyNo in range(1, NUM_POLICIES):
         totalSteps += numSteps
 
         if episodeNo > 10 and sumR == 0:
-            break
+            return 0
 
-        if episodeNo > 20 and (sumR / episodeNo) <= 0.75 * bestR:
-            break
+        if episodeNo > 20 and (sumR / episodeNo) < bestScore:
+            return 0
 
-    sumR /= NUM_EPISODES
+    return sumR / NUM_EPISODES
 
-    if sumR > bestR:
-        bestR = sumR
+for policyNo in range(1, NUM_POLICIES):
+
+    if policyNo % 2 == 0:
+        newPolicy = Policy(env.observation_space, env.action_space)
+
+        score = scorePolicy(newPolicy)
+        if score >= bestScore:
+            print('new policy')
+            bestPolicy = newPolicy
+            bestScore = score
+
+    else:
+        newPolicy = deepcopy(bestPolicy)
+        for p in newPolicy.parameters():
+            p.data = torch.normal(p.data, args.noise_stddev)
+
+        score = scorePolicy(newPolicy)
+        if score >= bestScore:
+            print('mutation')
+            bestPolicy = newPolicy
+            bestScore = score
 
     print(
         '%d/%d, steps: %d, reward: %.1f, best: %.1f' % (
             policyNo,
             NUM_POLICIES,
             totalSteps,
-            sumR,
-            bestR
+            score,
+            bestScore
         )
     )
 
 
+
+
+# TODO
 # Param updates weighed by returns of each noise vector
-
-
-
-
-
-
-
-
-
-
-
-#
