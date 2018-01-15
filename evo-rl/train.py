@@ -135,13 +135,18 @@ parser.add_argument(
 )
 parser.add_argument(
     '--lr',
-    default=0.0001,
+    default=0.01,
     help='learning rate'
 )
 parser.add_argument(
     '--noise_stddev',
-    default=0.001,
+    default=0.05,
     help='standard deviation of parameter noise'
+)
+parser.add_argument(
+    '--pop_size',
+    default=100,
+    help='population size'
 )
 args = parser.parse_args()
 
@@ -156,6 +161,93 @@ env = gym.make(args.env_name)
 
 
 
+
+
+
+
+
+NUM_ITRS = 10000
+NUM_EPISODES = 1
+
+# Note: time to create policy is on the order of 1 to 2 ms
+policy = Policy(env.observation_space, env.action_space)
+
+bestScore = 0
+totalSteps = 0
+
+def scorePolicy(policy, numEpisodes):
+    global totalSteps
+
+    sumR = 0
+    for episodeNo in range(1, numEpisodes+1):
+        rewards, numSteps = evalPolicy(policy, env)
+        sumR += rewards
+        totalSteps += numSteps
+
+    return sumR / numEpisodes
+
+for itrNo in range(1, NUM_ITRS+1):
+
+    pop = []
+    R = np.zeros(args.pop_size)
+
+    for i in range(0, args.pop_size):
+        newPolicy = deepcopy(policy)
+        pop.append(newPolicy)
+        for p in newPolicy.parameters():
+            p.data = torch.normal(p.data, args.noise_stddev)
+        R[i] = scorePolicy(newPolicy, 1)
+
+    #print(R)
+
+    # Advantage
+    std = np.std(R)
+    if std != 0:
+        A = (R - np.mean(R)) / np.std(R)
+    else:
+        A = (R - np.mean(R))
+
+    # Weight update
+    for paramIdx, p in enumerate(policy.parameters()):
+        for i in range(0, args.pop_size):
+            indParams = pop[i].parameters()
+            indP = list(indParams)[paramIdx]
+
+            weight = args.lr / (args.pop_size * args.noise_stddev) * A[i]
+
+            p.data = p.data + indP.data * weight
+
+
+
+
+
+    s = scorePolicy(policy, 100)
+    print(s)
+
+
+    #for paramIdx, p in enumerate(policy.parameters()):
+    #    print(p.data.mean())
+
+
+
+    """
+    print(
+        '%d/%d, steps: %d, reward: %.1f, best: %.1f' % (
+            policyNo,
+            NUM_POLICIES,
+            totalSteps,
+            score,
+            bestScore
+        )
+    )
+    """
+
+
+
+
+
+
+"""
 NUM_POLICIES = 10000
 NUM_EPISODES = 100
 
@@ -214,9 +306,21 @@ for policyNo in range(1, NUM_POLICIES):
             bestScore
         )
     )
-
+"""
 
 
 
 # TODO
 # Param updates weighed by returns of each noise vector
+
+"""
+Concretely, at each step we take a parameter vector w and generate a
+population of, say, 100 slightly different parameter vectors w1 ... w100 by
+jittering w with gaussian noise.
+
+We then evaluate each one of the 100 candidates independently by running the
+corresponding policy network in the environment for a while, and add up all
+the rewards in each case. The updated parameter vector then becomes the
+weighted sum of the 100 vectors, where each weight is proportional to the
+total reward (i.e. we want the more successful candidates to have a higher weight).
+"""
