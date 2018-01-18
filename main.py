@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import time
 import sys
 import threading
@@ -13,8 +14,6 @@ from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor
 
 import gym
 import gym_minigrid
-
-from model.training import selectAction
 
 class AIGameWindow(QMainWindow):
     """Application window for the baby AI game"""
@@ -69,12 +68,12 @@ class AIGameWindow(QMainWindow):
 
     def createRightArea(self):
         # Agent render view (partially observable)
-        self.obsImgLabel = QLabel()
-        self.obsImgLabel.setFrameStyle(QFrame.Panel | QFrame.Sunken)
-        miniViewBox = QHBoxLayout()
-        miniViewBox.addStretch(1)
-        miniViewBox.addWidget(self.obsImgLabel)
-        miniViewBox.addStretch(1)
+        #self.obsImgLabel = QLabel()
+        #self.obsImgLabel.setFrameStyle(QFrame.Panel | QFrame.Sunken)
+        #miniViewBox = QHBoxLayout()
+        #miniViewBox.addStretch(1)
+        #miniViewBox.addWidget(self.obsImgLabel)
+        #miniViewBox.addStretch(1)
 
         self.missionBox = QTextEdit()
         self.missionBox.setMinimumSize(500, 100)
@@ -108,7 +107,7 @@ class AIGameWindow(QMainWindow):
 
         # Stack everything up in a vetical layout
         vbox = QVBoxLayout()
-        vbox.addLayout(miniViewBox)
+        #vbox.addLayout(miniViewBox)
         #vbox.addWidget(hline)
         vbox.addLayout(stepsBox)
         vbox.addWidget(hline2)
@@ -158,14 +157,15 @@ class AIGameWindow(QMainWindow):
         return hbox
 
     def keyPressEvent(self, e):
+        actions = self.env.unwrapped.actions
         if e.key() == Qt.Key_Left:
-            self.stepEnv(self.env.actions.left)
+            self.stepEnv(actions.left)
         elif e.key() == Qt.Key_Right:
-            self.stepEnv(self.env.actions.right)
+            self.stepEnv(actions.right)
         elif e.key() == Qt.Key_Up:
-            self.stepEnv(self.env.actions.forward)
+            self.stepEnv(actions.forward)
         elif e.key() == Qt.Key_Space:
-            self.stepEnv(self.env.actions.toggle)
+            self.stepEnv(actions.toggle)
 
     def mousePressEvent(self, event):
         """
@@ -185,12 +185,13 @@ class AIGameWindow(QMainWindow):
         # The agent will get the mission as an observation
         # before performing the next action
         text = self.missionBox.toPlainText()
+        self.env.unwrapped.mission = text
 
     def adviceEdit(self):
         # The agent will get this advice as an observation
         # before performing the next action
         text = self.adviceBox.toPlainText()
-        self.lastObs['advice'] = text
+        #self.lastObs['advice'] = text
 
     def plusReward(self):
         print('+reward')
@@ -227,16 +228,16 @@ class AIGameWindow(QMainWindow):
     def resetEnv(self):
         obs = self.env.reset()
 
-        if not isinstance(obs, dict):
-            obs = { 'image': obs, 'advice': '', 'mission': '' }
+        #if not isinstance(obs, dict):
+        #    obs = { 'image': obs, 'advice': '', 'mission': '' }
 
         # If no mission is specified
-        if obs['mission']:
-            mission = obs['mission']
-        else:
-            mission = "Get to the green goal square"
+        #if obs['mission']:
+        #    mission = obs['mission']
+        #else:
+        #    mission = "Get to the green goal square"
 
-        self.missionBox.setPlainText(mission)
+        self.missionBox.setPlainText(self.env.unwrapped.mission)
 
         self.lastObs = obs
 
@@ -256,23 +257,23 @@ class AIGameWindow(QMainWindow):
         self.imgLabel.setPixmap(pixmap)
 
         # Render and display the agent's view
-        image = obs['image']
-        obsPixmap = unwrapped.getObsRender(image)
-        self.obsImgLabel.setPixmap(obsPixmap)
+        #image = obs['image']
+        #obsPixmap = unwrapped.getObsRender(image)
+        #self.obsImgLabel.setPixmap(obsPixmap)
 
         # Set the steps remaining displayadvice
         stepsRem = unwrapped.getStepsRemaining()
         self.stepsLabel.setText(str(stepsRem))
 
-        advice = obs['advice']
-        self.adviceBox.setPlainText(advice)
+        #advice = obs['advice']
+        #self.adviceBox.setPlainText(advice)
 
     def stepEnv(self, action=None):
         # If the environment doesn't supply a mission, get the
         # mission from the input text box
-        if not hasattr(self.lastObs, 'mission'):
-            text = self.missionBox.toPlainText()
-            self.lastObs['mission'] = text
+        #if not hasattr(self.lastObs, 'mission'):
+        #    text = self.missionBox.toPlainText()
+        #    self.lastObs['mission'] = text
 
         # If no manual action was specified by the user
         if action == None:
@@ -280,8 +281,8 @@ class AIGameWindow(QMainWindow):
 
         obs, reward, done, info = self.env.step(action)
 
-        if not isinstance(obs, dict):
-            obs = { 'image': obs, 'advice': '', 'mission': '' }
+        #if not isinstance(obs, dict):
+        #    obs = { 'image': obs, 'advice': '', 'mission': '' }
 
         self.showEnv(obs)
         self.lastObs = obs
@@ -304,19 +305,60 @@ class AIGameWindow(QMainWindow):
 
             self.stepEnv()
 
+
+
+
+
+
+
+import torch
+from torch.autograd import Variable
+
+def selectAction(obs):
+    global actor_critic
+
+    obs = obs.reshape((1, 1443))
+
+    states = torch.zeros(1, actor_critic.state_size)
+    masks = torch.zeros(1, 1)
+
+    obs = torch.from_numpy(obs)
+
+    value, action, _, states = actor_critic.act(Variable(obs, volatile=True),
+                                                Variable(states, volatile=True),
+                                                Variable(masks, volatile=True),
+                                                deterministic=True)
+    states = states.data
+    cpu_actions = action.data.squeeze(1).cpu().numpy()
+
+    # FIXME: this is probably a vector of actions for multiple envs?
+    return cpu_actions
+
+
+
+
 def main(argv):
+    global actor_critic
+
     parser = OptionParser()
     parser.add_option(
-        "-e",
         "--env-name",
-        dest="env",
         help="gym environment to load",
-        default='MiniGrid-MultiRoom-N6-v0'
+        default='MiniGrid-GoToObject-8x8-N2-v0'
     )
     (options, args) = parser.parse_args()
 
+
+    # Load a trained model
+    load_dir = './trained_models/acktr'
+    actor_critic, ob_rms = torch.load(os.path.join(load_dir, options.env_name + ".pt"))
+
+
+
     # Load the gym environment
-    env = gym.make(options.env)
+    env = gym.make(options.env_name)
+
+    env = gym_minigrid.wrappers.FlatObsWrapper(env)
 
     # Create the application window
     app = QApplication(sys.argv)
