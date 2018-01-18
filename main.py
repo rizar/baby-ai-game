@@ -348,15 +348,15 @@ def main(argv):
     )
     (options, args) = parser.parse_args()
 
-
     # Load a trained model
+    #actor_critic, ob_rms = torch.load('./trained_models/acktr/MiniGrid-Fetch-8x8-N3-v0.pt')
     load_dir = './trained_models/acktr'
     actor_critic, ob_rms = torch.load(os.path.join(load_dir, options.env_name + ".pt"))
 
-
-
     # Load the gym environment
     env = gym.make(options.env_name)
+
+    env.maxSteps = 100000
 
     env = gym_minigrid.wrappers.FlatObsWrapper(env)
 

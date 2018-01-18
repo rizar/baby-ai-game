@@ -24,9 +24,6 @@ class FFPolicy(nn.Module):
     def act(self, inputs, states, masks, deterministic=False):
         value, x, states = self(inputs, states, masks)
 
-        print('action value size')
-        print(x.size())
-
         action = self.dist.sample(x, deterministic=deterministic)
         action_log_probs, dist_entropy = self.dist.logprobs_and_entropy(x, action)
         return value, action, action_log_probs, states
@@ -170,9 +167,6 @@ class MLPPolicy(FFPolicy):
 
     def forward(self, inputs, states, masks):
         batch_numel = reduce(operator.mul, inputs.size()[1:], 1)
-
-        print(batch_numel)
-
         inputs = inputs.view(-1, batch_numel)
 
         x = self.v_fc1(inputs)
