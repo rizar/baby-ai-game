@@ -186,6 +186,7 @@ class AIGameWindow(QMainWindow):
         # before performing the next action
         text = self.missionBox.toPlainText()
         self.env.unwrapped.mission = text
+        print('mission edited "' + text + '"')
 
     def adviceEdit(self):
         # The agent will get this advice as an observation
