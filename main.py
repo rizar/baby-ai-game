@@ -76,12 +76,8 @@ class AIGameWindow(QMainWindow):
         #miniViewBox.addStretch(1)
 
         self.missionBox = QTextEdit()
-        self.missionBox.setMinimumSize(500, 100)
+        self.missionBox.setMinimumSize(300, 100)
         self.missionBox.textChanged.connect(self.missionEdit)
-
-        self.adviceBox = QTextEdit()
-        self.adviceBox.setMinimumSize(500, 100)
-        self.adviceBox.textChanged.connect(self.adviceEdit)
 
         buttonBox = self.createButtons()
 
@@ -111,10 +107,10 @@ class AIGameWindow(QMainWindow):
         #vbox.addWidget(hline)
         vbox.addLayout(stepsBox)
         vbox.addWidget(hline2)
-        vbox.addWidget(QLabel("General mission"))
+        vbox.addWidget(QLabel("Mission"))
         vbox.addWidget(self.missionBox)
-        vbox.addWidget(QLabel("Contextual advice"))
-        vbox.addWidget(self.adviceBox)
+        #vbox.addWidget(QLabel("Contextual advice"))
+        #vbox.addWidget(self.adviceBox)
         vbox.addLayout(buttonBox)
 
         return vbox
@@ -150,9 +146,9 @@ class AIGameWindow(QMainWindow):
         hbox.addWidget(slider)
         hbox.addWidget(self.fpsLabel)
         hbox.addStretch(1)
-        hbox.addWidget(minusButton)
-        hbox.addWidget(plusButton)
-        hbox.addStretch(1)
+        #hbox.addWidget(minusButton)
+        #hbox.addWidget(plusButton)
+        #hbox.addStretch(1)
 
         return hbox
 
@@ -358,6 +354,7 @@ def main(argv):
     env = gym.make(options.env_name)
 
     env.maxSteps = 100000
+    env.waitEnds = False
 
     env = gym_minigrid.wrappers.FlatObsWrapper(env)
 
