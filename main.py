@@ -284,8 +284,8 @@ class AIGameWindow(QMainWindow):
         self.showEnv(obs)
         self.lastObs = obs
 
-        if done:
-            self.resetEnv()
+        #if done:
+        #    self.resetEnv()
 
     def stepLoop(self):
         """Auto stepping loop, runs in its own thread"""
@@ -354,7 +354,6 @@ def main(argv):
     env = gym.make(options.env_name)
 
     env.maxSteps = 100000
-    env.waitEnds = False
 
     env = gym_minigrid.wrappers.FlatObsWrapper(env)
 
