@@ -56,8 +56,18 @@ def main():
         viz = Visdom()
         win = None
 
-    envs = [make_env(args.env_name, args.seed, i, args.log_dir)
-                for i in range(args.num_processes)]
+    steps = [
+        (6, 2),
+        (6, 3),
+        (7, 2),
+        (7, 3),
+        (8, 2),
+        (8, 3)
+    ]
+
+    envSize, numObjs = steps[0]
+    steps = steps[1:]
+    envs = [make_env(args.env_name, args.seed, i, args.log_dir, envSize, numObjs) for i in range(args.num_processes)]
 
     if args.num_processes > 1:
         envs = SubprocVecEnv(envs)
@@ -77,9 +87,7 @@ def main():
     if len(obs_shape) == 3 and obs_numel > 1024:
         actor_critic = CNNPolicy(obs_shape[0], envs.action_space, args.recurrent_policy)
     else:
-        assert not args.recurrent_policy, \
-            "Recurrent policy is not implemented for the MLP controller"
-        actor_critic = MLPPolicy(obs_numel, envs.action_space)
+        actor_critic = MLPPolicy(obs_numel, envs.action_space, args.recurrent_policy)
 
     # Maxime: log some info about the model and its size
     modelSize = 0
@@ -104,7 +112,7 @@ def main():
     elif args.algo == 'acktr':
         optimizer = KFACOptimizer(actor_critic)
 
-    rollouts = RolloutStorage(args.num_steps, args.num_processes, obs_shape, envs.action_space, actor_critic.state_size)
+    rollouts = RolloutStorage(args.num_steps, args.num_processes, obs_shape, envs.action_space, actor_critic.state_size())
     current_obs = torch.zeros(args.num_processes, *obs_shape)
 
     def update_current_obs(obs):
@@ -166,7 +174,7 @@ def main():
 
         if args.algo in ['a2c', 'acktr']:
             values, action_log_probs, dist_entropy, states = actor_critic.evaluate_actions(Variable(rollouts.observations[:-1].view(-1, *obs_shape)),
-                                                                                           Variable(rollouts.states[0].view(-1, actor_critic.state_size)),
+                                                                                           Variable(rollouts.states[0].view(-1, actor_critic.state_size())),
                                                                                            Variable(rollouts.masks[:-1].view(-1, 1)),
                                                                                            Variable(rollouts.actions.view(-1, action_shape)))
 
@@ -260,7 +268,9 @@ def main():
         if j % args.log_interval == 0:
             end = time.time()
             total_num_steps = (j + 1) * args.num_processes * args.num_steps
-            print("Updates {}, num timesteps {}, FPS {}, mean/median reward {:.1f}/{:.1f}, min/max reward {:.1f}/{:.1f}, entropy {:.5f}, value loss {:.5f}, policy loss {:.5f}".
+
+            print("envSize = {}, numObjs = {}".format(envSize, numObjs))
+            print("Updates {}, num timesteps {}, FPS {}, mean/median reward {:.2f}/{:.2f}, min/max reward {:.2f}/{:.2f}, entropy {:.5f}, value loss {:.5f}, policy loss {:.5f}".
                 format(j, total_num_steps,
                        int(total_num_steps / (end - start)),
                        final_rewards.mean(),
@@ -268,12 +278,15 @@ def main():
                        final_rewards.min(),
                        final_rewards.max(), dist_entropy.data[0],
                        value_loss.data[0], action_loss.data[0]))
-        if args.vis and j % args.vis_interval == 0:
-            try:
-                # Sometimes monitor doesn't properly flush the outputs
-                win = visdom_plot(viz, win, args.log_dir, args.env_name, args.algo)
-            except IOError:
-                pass
+
+            if final_rewards.min() > 0.98:
+                envSize, numObjs = steps[0]
+                steps = steps[1:]
+                envs = [make_env(args.env_name, args.seed, i, args.log_dir, envSize, numObjs) for i in range(args.num_processes)]
+                envs = SubprocVecEnv(envs)
+
+
+
 
 if __name__ == "__main__":
     main()

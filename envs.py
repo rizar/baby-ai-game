@@ -15,21 +15,15 @@ except ImportError:
 try:
     import gym_minigrid
     from gym_minigrid.wrappers import *
+    from gym_minigrid.envs import *
 except:
     pass
 
-
-def make_env(env_id, seed, rank, log_dir):
+def make_env(env_id, seed, rank, log_dir, size, numObjs):
     def _thunk():
-        env = gym.make(env_id)
-        is_atari = hasattr(gym.envs, 'atari') and isinstance(env.unwrapped, gym.envs.atari.atari_env.AtariEnv)
-        if is_atari:
-            env = make_atari(env_id)
+        env = PutNearEnv(size=size, numObjs=numObjs)
+
         env.seed(seed + rank)
-        if log_dir is not None:
-            env = bench.Monitor(env, os.path.join(log_dir, str(rank)))
-        if is_atari:
-            env = wrap_deepmind(env)
 
         env = FlatObsWrapper(env)
 

@@ -123,33 +123,39 @@ def weights_init_mlp(m):
 
 
 class MLPPolicy(FFPolicy):
-    def __init__(self, num_inputs, action_space):
+    def __init__(self, num_inputs, action_space, use_gru):
         super(MLPPolicy, self).__init__()
 
         self.action_space = action_space
 
-        self.a_fc1 = nn.Linear(num_inputs, 64)
-        self.a_fc2 = nn.Linear(64, 64)
+        self.a_fc1 = nn.Linear(num_inputs, 128)
+        self.a_fc2 = nn.Linear(128, 128)
 
-        self.v_fc1 = nn.Linear(num_inputs, 64)
-        self.v_fc2 = nn.Linear(64, 64)
-        self.v_fc3 = nn.Linear(64, 1)
+        self.v_fc1 = nn.Linear(num_inputs, 128)
+        self.v_fc2 = nn.Linear(128, 128)
+
+        if use_gru:
+            self.gru = nn.GRUCell(128, 128)
+
+        self.v_fc3 = nn.Linear(128, 1)
 
         if action_space.__class__.__name__ == "Discrete":
             num_outputs = action_space.n
-            self.dist = Categorical(64, num_outputs)
+            self.dist = Categorical(128, num_outputs)
         elif action_space.__class__.__name__ == "Box":
             num_outputs = action_space.shape[0]
-            self.dist = DiagGaussian(64, num_outputs)
+            self.dist = DiagGaussian(128, num_outputs)
         else:
             raise NotImplementedError
 
         self.train()
         self.reset_parameters()
 
-    @property
     def state_size(self):
-        return 1
+        if hasattr(self, 'gru'):
+            return 128
+        else:
+            return 1
 
     def reset_parameters(self):
         self.apply(weights_init_mlp)
@@ -161,6 +167,13 @@ class MLPPolicy(FFPolicy):
         self.v_fc1.weight.data.mul_(tanh_gain)
         self.v_fc2.weight.data.mul_(tanh_gain)
         """
+
+        if hasattr(self, 'gru'):
+            orthogonal(self.gru.weight_ih.data)
+            orthogonal(self.gru.weight_hh.data)
+            self.gru.bias_ih.data.fill_(0)
+            self.gru.bias_hh.data.fill_(0)
+
 
         if self.dist.__class__.__name__ == "DiagGaussian":
             self.dist.fc_mean.weight.data.mul_(0.01)
@@ -175,6 +188,22 @@ class MLPPolicy(FFPolicy):
         x = self.v_fc2(x)
         x = F.tanh(x)
 
+        if hasattr(self, 'gru'):
+            if inputs.size(0) == states.size(0):
+                #print(x.size())
+                #print(states.size())
+                #print(masks.size())
+
+                x = states = self.gru(x, states * masks)
+            else:
+                x = x.view(-1, states.size(0), x.size(1))
+                masks = masks.view(-1, states.size(0), 1)
+                outputs = []
+                for i in range(x.size(0)):
+                    hx = states = self.gru(x[i], states * masks[i])
+                    outputs.append(hx)
+                x = torch.cat(outputs, 0)
+
         x = self.v_fc3(x)
         value = x
 
@@ -183,5 +212,7 @@ class MLPPolicy(FFPolicy):
 
         x = self.a_fc2(x)
         x = F.tanh(x)
+
+
 
         return value, x, states
