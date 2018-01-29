@@ -72,11 +72,10 @@ class Teacher(Wrapper):
 
         obs = {
             "image": obs,
-            "advice": advice,
-            "bestActions": self.bestActions
+            "mission": advice,
         }        
 
-        print('best action ', obs['bestActions'])
+        print('best action ', self.bestActions)
 
         return obs, reward, done, info
 
