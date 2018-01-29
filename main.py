@@ -15,6 +15,7 @@ import gym
 import gym_minigrid
 
 from model.training import selectAction
+from gym_aigame.envs import teacher
 
 class AIGameWindow(QMainWindow):
     """Application window for the baby AI game"""
@@ -312,7 +313,7 @@ def main(argv):
 
     # Load the gym environment
     env = gym.make(options.env_name)
-
+    env = teacher.Teacher(env)
     # Create the application window
     app = QApplication(sys.argv)
     window = AIGameWindow(env)
