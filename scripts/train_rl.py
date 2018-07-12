@@ -21,7 +21,7 @@ from babyai.utils.agent import ModelAgent
 # Parse arguments
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--algo", required=True,
+parser.add_argument("--algo", default='ppo',
                     help="algorithm to use: a2c | ppo (REQUIRED)")
 parser.add_argument("--env", default=None,
                     help="name of the environment to train on (REQUIRED or --curriculum REQUIRED)")
